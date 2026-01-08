@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  walletAddress String    @unique @map("wallet_address")
+  username      String?   @unique
+  email         String?   @unique
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  ownedPersonas   Persona[] @relation("PersonaOwner")
+  createdPersonas Persona[] @relation("PersonaCreator")
+  battles         Battle[]  @relation("BattleInitiator")
+  
+  @@map("users")
+}
+
+enum PersonaTier {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+model Persona {
+  id             String       @id @default(uuid())
+  mintAddress    String       @unique @map("mint_address")
+  walletPda      String       @unique @map("wallet_pda")
+  
+  name           String
+  tier           PersonaTier
+  avatarUrl      String?      @map("avatar_url")
+  description    String?      @db.Text
+  
+  // Traits (0-100)
+  intelligence   Int          @default(50)
+  creativity     Int          @default(50)
+  persuasion     Int          @default(50)
+  empathy        Int          @default(50)
+  technical      Int          @default(50)
+  
+  // Ownership
+  ownerId        String       @map("owner_id")
+  owner          User         @relation("PersonaOwner", fields: [ownerId], references: [id])
+  creatorId      String       @map("creator_id")
+  creator        User         @relation("PersonaCreator", fields: [creatorId], references: [id])
+  
+  // Stats
+  battlesWon     Int          @default(0) @map("battles_won")
+  battlesLost    Int          @default(0) @map("battles_lost")
+  eloRating      Int          @default(1000) @map("elo_rating")
+  totalRevenue   Decimal      @default(0) @map("total_revenue") @db.Decimal(18, 8)
+  
+  // Generation metadata
+  promptText     String       @map("prompt_text") @db.Text
+  promptScore    Json         @map("prompt_score")
+  generationCost Decimal      @map("generation_cost") @db.Decimal(10, 6)
+  
+  // Battle state
+  isWounded      Boolean      @default(false) @map("is_wounded")
+  woundedUntil   DateTime?    @map("wounded_until")
+  
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  
+  walletTransactions WalletTransaction[]
+  battlesAsPersona1  Battle[] @relation("BattlePersona1")
+  battlesAsPersona2  Battle[] @relation("BattlePersona2")
+  battlesAsWinner    Battle[] @relation("BattleWinner")
+  generationCostRecord GenerationCost?
+  marketplaceListings MarketplaceListing[]
+  
+  @@index([tier])
+  @@index([eloRating])
+  @@index([ownerId])
+  @@index([creatorId])
+  @@map("personas")
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum EarningType {
+  BATTLE
+  MARKETPLACE
+  CHAT
+  TIP
+}
+
+model WalletTransaction {
+  id              String          @id @default(uuid())
+  personaId       String          @map("persona_id")
+  persona         Persona         @relation(fields: [personaId], references: [id])
+  walletPda       String          @map("wallet_pda")
+  
+  transactionType TransactionType @map("transaction_type")
+  earningType     EarningType?    @map("earning_type")
+  amount          Decimal         @db.Decimal(18, 8)
+  
+  relatedBattleId String?         @map("related_battle_id")
+  relatedBattle   Battle?         @relation(fields: [relatedBattleId], references: [id])
+  txSignature     String?         @map("tx_signature")
+  
+  createdAt       DateTime        @default(now()) @map("created_at")
+  
+  @@index([personaId])
+  @@index([walletPda])
+  @@map("wallet_transactions")
+}
+
+enum BattleMode {
+  CASUAL
+  RANKED
+  DEATHMATCH
+}
+
+enum BattleStatus {
+  PENDING
+  ARGUING
+  JUDGING
+  COMPLETED
+  CANCELLED
+}
+
+model Battle {
+  id               String        @id @default(uuid())
+  battleMode       BattleMode    @map("battle_mode")
+  topic            String        @db.Text
+  
+  persona1Id       String        @map("persona1_id")
+  persona1         Persona       @relation("BattlePersona1", fields: [persona1Id], references: [id])
+  persona2Id       String        @map("persona2_id")
+  persona2         Persona       @relation("BattlePersona2", fields: [persona2Id], references: [id])
+  
+  initiatorId      String        @map("initiator_id")
+  initiator        User          @relation("BattleInitiator", fields: [initiatorId], references: [id])
+  
+  persona1Argument String?       @map("persona1_argument") @db.Text
+  persona2Argument String?       @map("persona2_argument") @db.Text
+  
+  winnerId         String?       @map("winner_id")
+  winner           Persona?      @relation("BattleWinner", fields: [winnerId], references: [id])
+  judgeResult      Json?         @map("judge_result")
+  
+  entryFee         Decimal       @map("entry_fee") @db.Decimal(18, 8)
+  winnerReward     Decimal?      @map("winner_reward") @db.Decimal(18, 8)
+  
+  status           BattleStatus  @default(PENDING)
+  
+  createdAt        DateTime      @default(now()) @map("created_at")
+  completedAt      DateTime?     @map("completed_at")
+  
+  walletTransactions WalletTransaction[]
+  
+  @@index([battleMode])
+  @@index([status])
+  @@index([persona1Id])
+  @@index([persona2Id])
+  @@map("battles")
+}
+
+model GenerationCost {
+  id                      String   @id @default(uuid())
+  personaId               String   @unique @map("persona_id")
+  persona                 Persona  @relation(fields: [personaId], references: [id])
+  
+  promptEvaluationCost    Decimal  @map("prompt_evaluation_cost") @db.Decimal(10, 6)
+  textGenerationCost      Decimal  @map("text_generation_cost") @db.Decimal(10, 6)
+  imageGenerationCost     Decimal  @map("image_generation_cost") @db.Decimal(10, 6)
+  blockchainCost          Decimal  @map("blockchain_cost") @db.Decimal(10, 6)
+  platformFee             Decimal  @map("platform_fee") @db.Decimal(10, 6)
+  
+  totalUsd                Decimal  @map("total_usd") @db.Decimal(10, 6)
+  totalSol                Decimal  @map("total_sol") @db.Decimal(18, 8)
+  solPriceUsd             Decimal  @map("sol_price_usd") @db.Decimal(10, 2)
+  
+  createdAt               DateTime @default(now()) @map("created_at")
+  
+  @@map("generation_costs")
+}
+
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  CANCELLED
+}
+
+model MarketplaceListing {
+  id          String        @id @default(uuid())
+  personaId   String        @map("persona_id")
+  persona     Persona       @relation(fields: [personaId], references: [id])
+  
+  price       Decimal       @db.Decimal(18, 8)
+  status      ListingStatus @default(ACTIVE)
+  
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  soldAt      DateTime?     @map("sold_at")
+  
+  @@index([status])
+  @@index([personaId])
+  @@map("marketplace_listings")
+}
